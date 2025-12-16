@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Interactive Bézier Rope</title>
+
+<style>
+body {
+  margin: 0;
+  background: radial-gradient(circle at center, #0a0020, #000010);
+  overflow: hidden;
+}
+canvas {
+  display: block;
+}
+</style>
+</head>
+<body>
+
+<canvas id="canvas"></canvas>
+
+<script>
+// ================= Canvas Setup =================
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener("resize", resize);
+
+// ================= Vector Class =================
+class Vec2 {
+  constructor(x, y) {
+    this.x = x;
+    this.y = y;
+  }
+  add(v) { return new Vec2(this.x + v.x, this.y + v.y); }
+  sub(v) { return new Vec2(this.x - v.x, this.y - v.y); }
+  mul(s) { return new Vec2(this.x * s, this.y * s); }
+  length() { return Math.hypot(this.x, this.y); }
+  normalize() {
+    const l = this.length() || 1;
+    return new Vec2(this.x / l, this.y / l);
+  }
+}
+
+// ================= NEON BACKGROUND PARTICLES =================
+class Particle {
+  constructor() {
+    this.reset();
+  }
+  reset() {
+    this.pos = new Vec2(
+      Math.random() * canvas.width,
+      Math.random() * canvas.height
+    );
+    this.vel = new Vec2(
+      (Math.random() - 0.5) * 0.3,
+      (Math.random() - 0.5) * 0.3
+    );
+    this.radius = Math.random() * 2 + 1;
+    this.alpha = Math.random() * 0.5 + 0.3;
+  }
+  update() {
+    this.pos = this.pos.add(this.vel);
+    if (
+      this.pos.x < 0 || this.pos.x > canvas.width ||
+      this.pos.y < 0 || this.pos.y > canvas.height
+    ) this.reset();
+  }
+  draw() {
+    ctx.fillStyle = `rgba(120, 80, 255, ${this.alpha})`;
+    ctx.beginPath();
+    ctx.arc(this.pos.x, this.pos.y, this.radius, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+const particles = [];
+for (let i = 0; i < 140; i++) particles.push(new Particle());
+
+// ================= Spring Control Point =================
+class ControlPoint {
+  constructor(x, y) {
+    this.pos = new Vec2(x, y);
+    this.vel = new Vec2(0, 0);
+    this.target = new Vec2(x, y);
+  }
+
+  update(dt) {
+    const k = 18;
+    const damping = 6;
+
+    const force = this.pos.sub(this.target).mul(-k);
+    const accel = force.sub(this.vel.mul(damping));
+
+    this.vel = this.vel.add(accel.mul(dt));
+    this.pos = this.pos.add(this.vel.mul(dt));
+  }
+}
+
+// ================= Control Points =================
+const P0 = new Vec2(120, window.innerHeight / 2);
+const P3 = new Vec2(window.innerWidth - 120, window.innerHeight / 2);
+
+const P1 = new ControlPoint(300, window.innerHeight / 2 - 150);
+const P2 = new ControlPoint(window.innerWidth - 300, window.innerHeight / 2 + 150);
+
+// ================= Mouse Input =================
+let mouse = new Vec2(canvas.width / 2, canvas.height / 2);
+
+canvas.addEventListener("mousemove", e => {
+  mouse = new Vec2(e.clientX, e.clientY);
+  P1.target = mouse.add(new Vec2(-120, -80));
+  P2.target = mouse.add(new Vec2(120, 80));
+});
+
+// ================= Bézier Math =================
+function bezier(t, P0, P1, P2, P3) {
+  const u = 1 - t;
+  return P0.mul(u*u*u)
+    .add(P1.mul(3*u*u*t))
+    .add(P2.mul(3*u*t*t))
+    .add(P3.mul(t*t*t));
+}
+
+function bezierTangent(t, P0, P1, P2, P3) {
+  const u = 1 - t;
+  return P1.sub(P0).mul(3*u*u)
+    .add(P2.sub(P1).mul(6*u*t))
+    .add(P3.sub(P2).mul(3*t*t));
+}
+
+// ================= Drawing =================
+function drawPoint(p, color) {
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function draw() {
+  ctx.fillStyle = "rgba(0,0,20,0.35)";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Background particles
+  particles.forEach(p => {
+    p.update();
+    p.draw();
+  });
+
+  // Curve (Neon)
+  ctx.strokeStyle = "#00ffd5";
+  ctx.lineWidth = 3;
+  ctx.shadowColor = "#00ffd5";
+  ctx.shadowBlur = 20;
+
+  ctx.beginPath();
+  for (let t = 0; t <= 1.001; t += 0.01) {
+    const p = bezier(t, P0, P1.pos, P2.pos, P3);
+    t === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y);
+  }
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  // Tangents
+  ctx.strokeStyle = "#ffcc00";
+  for (let t = 0; t <= 1.001; t += 0.1) {
+    const p = bezier(t, P0, P1.pos, P2.pos, P3);
+    const tan = bezierTangent(t, P0, P1.pos, P2.pos, P3)
+      .normalize()
+      .mul(30);
+
+    ctx.beginPath();
+    ctx.moveTo(p.x, p.y);
+    ctx.lineTo(p.x + tan.x, p.y + tan.y);
+    ctx.stroke();
+  }
+
+  // Control Points
+  drawPoint(P0, "#ffffff");
+  drawPoint(P1.pos, "#ff66ff");
+  drawPoint(P2.pos, "#ff66ff");
+  drawPoint(P3, "#ffffff");
+}
+
+// ================= Animation Loop =================
+let last = performance.now();
+function loop(time) {
+  const dt = Math.min((time - last) / 1000, 0.016);
+  last = time;
+
+  P1.update(dt);
+  P2.update(dt);
+
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+
+</body>
+</html>
